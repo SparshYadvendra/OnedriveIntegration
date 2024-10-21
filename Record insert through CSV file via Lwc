@@ -1,0 +1,456 @@
+
+Our requirement - 
+Requirement 1-----We have create a LWC component which can insert record via CSV file upto 50 million records. And generate error and success file separately.
+Salesforce Object and fields,
+Object Name - Upwork Transaction (Upwork_Transaction__c)
+Fields- 
+(Field Names)             (API Names)             (Data Type)
+Reference Id	              Name	                  Text(80) --- We have added a validation in which we can only enter number in this field
+Transaction Date	     Transaction_Date__c	        Date ---      Required field
+Transaction Type	     Transaction_Type__c	        Picklist(Debit, Credit)
+Transaction Sub-Type   Transaction_Sub_Type__c	    Picklist(Membership Fee, Service Fee, WHT, Withdrawal, Withdrawal Fee, Fixed Price, Hourly)
+Invoice Link	         Invoice_Link__c	            URL(255)
+Account Name	         Account_Name1__c	            Lookup(Account)			
+Amount	               Amount__c	                  Currency(18, 0)
+Description	           Description__c	              Text Area(255) -- Required field
+
+CSV files fields-
+Account Name	          Ref ID	          Type	        Description	        Amount	       Date	         Transaction Type
+
+
+
+Solution--
+HTML-
+<template>
+    <div style="display: flex;width: 100%;justify-content: space-around;">
+        <lightning-card icon-name="custom:custom18" title="Upwork Transaction Insert and PDF Uploader" style="width:50%">
+            <div style="margin-left: 3%">
+                <lightning-file-upload accept={acceptedPDFFormats} 
+                                       label="Attach File" 
+                                       multiple="false" 
+                                       onuploadfinished={uploadFileHandler} 
+                                       record-id={recordId}></lightning-file-upload>
+                <template if:true={iframeSrc}>
+                    <iframe src={iframeSrc} style="display:none;" width="100%" height="500px"></iframe>
+                </template>
+            </div>
+            <div if:true={error}>
+                {error.message}
+            </div><br/>
+            <div if:true={data}>
+                <lightning-datatable columns={columnsAccount} 
+                                     data={data} 
+                                     hide-checkbox-column="true" 
+                                     key-field="id"></lightning-datatable>
+            </div>
+        </lightning-card>
+    </div>
+</template>
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Java Script-
+
+import { LightningElement, track, api } from 'lwc';
+import { ShowToastEvent } from 'lightning/platformShowToastEvent';
+import csvFileRead from '@salesforce/apex/CSVFileReadLWCCntrl.startCSVImportBatch';
+import checkExistingRecords from '@salesforce/apex/UpworkTransactionController.checkExistingRecords';
+
+const transactionObj = [
+    // Your existing transactionObj definitions
+];
+
+export default class FileUploaderLWC extends LightningElement {
+    @track errorMessage; // Update to errorMessage
+    @track successMessage; // New property for success message
+    @track transactionObj = transactionObj;
+    @api recordId;
+    @track error;
+    @track data;
+ 
+
+    get acceptedFormats() {
+        return ['.csv', '.pdf'];
+    }
+connectedCallback() {
+    this.iframeSrc = '/apex/UpworkTransaction';
+}
+
+    uploadFileHandler(event) {
+    const uploadedFiles = event.detail.files;
+    console.log('uploadedFiles', Array.from(uploadedFiles));
+
+    // Check if files were uploaded
+    if (uploadedFiles.length === 0) {
+        return; // Exit if no files are uploaded
+    }
+
+    // Map to get document IDs and check file type
+    const fileDocumentIds = uploadedFiles.map(file => file.documentId);
+    const isCsvFile = uploadedFiles.some(file => file.mimeType ==='text/csv');
+
+    // Handle CSV file upload
+    if (isCsvFile) {
+        csvFileRead({ contentDocumentId: fileDocumentIds[0], recordid: this.recordId }) // assuming you want the first CSV file
+            .then(result => {
+                this.successMessage = result; // Assign success message
+                this.errorMessage = undefined; // Clear any previous error messages
+
+                this.dispatchEvent(
+                    new ShowToastEvent({
+                        title: 'Success!!',
+                        message: result,
+                        variant: 'success',
+                    }),
+                );
+            })
+            .catch(error => {
+                // Capture the custom error message from the Apex AuraHandledException
+                const errorMessage = error.body.message || 'Unknown error occurred';
+                console.log('Error log:', errorMessage);
+
+                this.errorMessage = errorMessage; // Assign error message
+                this.successMessage = undefined; // Clear any previous success messages
+
+                this.dispatchEvent(
+                    new ShowToastEvent({
+                        title: 'Error!!',
+                        message: errorMessage,
+                        variant: 'error',
+                    }),
+                );
+            });
+    } else {
+        // Handle PDF file upload
+        // Call the checkExistingRecords method with the array of file document IDs
+       checkExistingRecords({ contentDocumentId: fileDocumentIds })
+    .then(result => {
+        this.data = result;
+        console.log('result:', result); 
+
+        // Handle Success PDFs
+        if (result['Success PDF'] && result['Success PDF'].length > 0) {
+            const successIds = result['Success PDF'].join(', '); // Join IDs into a single string
+            this.dispatchEvent(
+                new ShowToastEvent({
+                    title: 'Success!',
+                    message: `Successfully retrieved record IDs: ${successIds}`,
+                    variant: 'success',
+                }),
+            );
+        }
+
+        // Handle Failed PDFs
+       if (result['Failed PDF'] && result['Failed PDF'].length > 0) {
+            const failedIds = result['Failed PDF'].join(', '); // Join IDs into a single string
+            this.dispatchEvent(
+                new ShowToastEvent({
+                    title: 'Error!',
+                    message: `Failed to retrieve record IDs: ${failedIds}`,
+                    variant: 'error',
+                }),
+            );
+        }
+
+
+        // Open the Visualforce page in a new tab
+        this.iframeSrc = '/apex/UpworkTransaction';
+    })
+    .catch(error => {
+        this.error = error.body.message;
+        console.log('error:', this.error); 
+
+        // Show generic error toast message
+        this.dispatchEvent(
+            new ShowToastEvent({
+                title: 'Error!',
+                message: this.error || 'An error occurred while retrieving records.',
+                variant: 'error',
+            }),
+        );
+    });
+
+}
+    }
+
+}
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+XML-
+<?xml version="1.0" encoding="UTF-8"?>
+<LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata" fqn="fileUploader">
+    <apiVersion>57.0</apiVersion>
+    <isExposed>true</isExposed>
+	<targets>
+		<target>lightning__HomePage</target>
+		<target>lightning__RecordPage</target>
+		<target>lightning__Tab</target>
+	</targets>
+</LightningComponentBundle>
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Apex Batch Class-
+
+global class CSVFileReadBatch implements Database.Batchable<sObject>, Database.Stateful {
+    global List<Upwork_Transaction__c> transactionInsertList;
+    global id redId;
+    global List<String> errorList = new List<String>();  // To store failed records with errors
+    global List<String> successList = new List<String>(); // To store successfully inserted records
+
+    global CSVFileReadBatch(List<Upwork_Transaction__c> transactionInsertList, id redId) {
+        this.transactionInsertList = transactionInsertList;
+        this.redId=redId;
+        system.debug('redId : '+this.redId);
+        system.debug('Upwork_Transaction__c : '+this.transactionInsertList[0].id);
+    }
+
+    global sObject[] start(Database.BatchableContext BC) {
+        return transactionInsertList;
+    }
+
+    global void execute(Database.BatchableContext BC, List<Upwork_Transaction__c> scope) {
+        try {
+            // Insert records with partial success allowed
+            Database.SaveResult[] results = Database.insert(scope, false);
+
+            // Loop through the results to capture success and error details
+            for (Integer i = 0; i < results.size(); i++) {
+                if (results[i].isSuccess()) {
+                    // Add the success record details to the success list
+                    String successRecord = 'Record Name: ' + (scope[i].Name != null ? scope[i].Name : 'N/A') +
+                                           ', Amount: ' + scope[i].Amount__c +
+                                           ', Transaction Date: ' + scope[i].Transaction_Date__c;
+                    successList.add(successRecord);
+                } else {
+                    // Capture details of the error for the failed records
+                    for (Database.Error err : results[i].getErrors()) {
+                        String errorRecord = 'Record Name: ' + (scope[i].Name != null ? scope[i].Name : 'N/A') +
+                                             ', Field: ' + err.getFields() +
+                                             ', Error: ' + err.getMessage();
+                        errorList.add(errorRecord);
+                         System.debug('errorList: ' + errorList);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // Handle unexpected exceptions
+        }
+    }
+
+    global void finish(Database.BatchableContext BC) {
+        system.debug('Upwork_Transaction__c finish : '+this.transactionInsertList[0].id);
+    Id transactionRecordId = [SELECT Id FROM Upwork_Transaction__c LIMIT 1].Id; // Adjust if needed
+    System.debug('Transaction Record ID: ' + transactionRecordId);
+
+    // Generate CSV for Success records
+    if (!successList.isEmpty()) {
+        System.debug('Generating CSV for Success Records.');
+        String successCSV = 'Record Name,Amount,Transaction Date\n'; // CSV header
+        successCSV += String.join(successList, '\n'); // Append success records
+
+        // Store the success CSV file in Salesforce
+        ContentVersion successFile = new ContentVersion();
+        successFile.Title = 'Batch_Success.csv';
+        successFile.PathOnClient = 'Batch_Success.csv';
+        successFile.VersionData = Blob.valueOf(successCSV);
+        insert successFile;
+
+        // Query ContentDocumentId from ContentVersion
+        ContentVersion queriedSuccessFile = [SELECT ContentDocumentId FROM ContentVersion WHERE Id = :successFile.Id LIMIT 1];
+        System.debug('Success ContentDocument ID: ' + queriedSuccessFile.ContentDocumentId);
+
+        // Link the document to the Upwork_Transaction__c record
+        ContentDocumentLink successLink = new ContentDocumentLink();
+        successLink.LinkedEntityId = transactionRecordId; // Upwork_Transaction__c record Id
+        System.debug('transactionRecordId' +transactionRecordId);
+        successLink.ContentDocumentId = queriedSuccessFile.ContentDocumentId;
+        successLink.ShareType = 'I'; // Inferred permission (try this)
+        successLink.Visibility = 'AllUsers'; // Ensure all users can see it
+        insert successLink;
+
+        System.debug('Success Document linked to Upwork_Transaction__c. Link ID: ' + successLink.Id);
+    } else {
+        System.debug('No successful records to store.');
+    }
+
+    // Generate CSV for Failed records
+    if (!errorList.isEmpty()) {
+        System.debug('Generating CSV for Failed Records.');
+        String errorCSV = 'Record Name,Field,Error\n'; // CSV header
+        errorCSV += String.join(errorList, '\n'); // Append error records
+
+        // Store the error CSV file in Salesforce
+        ContentVersion errorFile = new ContentVersion();
+        errorFile.Title = 'Batch_Errors.csv';
+        errorFile.PathOnClient = 'Batch_Errors.csv';
+        errorFile.VersionData = Blob.valueOf(errorCSV);
+        insert errorFile;
+
+        // Query ContentDocumentId from ContentVersion
+        ContentVersion queriedErrorFile = [SELECT ContentDocumentId FROM ContentVersion WHERE Id = :errorFile.Id LIMIT 1];
+        System.debug('Error ContentDocument ID: ' + queriedErrorFile.ContentDocumentId);
+
+        // Link the document to the Upwork_Transaction__c record
+        ContentDocumentLink errorLink = new ContentDocumentLink();
+        errorLink.LinkedEntityId = transactionRecordId; // Upwork_Transaction__c record Id
+        System.debug('redId' +redId);
+        System.debug('errorLink' +errorLink.LinkedEntityId);
+        System.debug('transactionRecordId' +transactionRecordId);
+        errorLink.ContentDocumentId = queriedErrorFile.ContentDocumentId;
+        errorLink.ShareType = 'I'; // Inferred permission
+        errorLink.Visibility = 'AllUsers'; // Ensure all users can see it
+        insert errorLink;
+
+        System.debug('Error Document linked to Upwork_Transaction__c. Link ID: ' + errorLink.Id);
+    } else {
+        System.debug('No errors encountered during the batch execution.');
+    }
+
+    // Query to manually check linked documents
+    List<ContentDocumentLink> linkedDocs = [SELECT Id, ContentDocumentId, LinkedEntityId FROM ContentDocumentLink WHERE LinkedEntityId = :transactionRecordId];
+    System.debug('Linked Documents: ' + linkedDocs);
+}
+
+}
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Apex Controller-
+public class CSVFileReadLWCCntrl {
+    
+    @AuraEnabled
+    public static String startCSVImportBatch(Id contentDocumentId, Id recordid) {
+        List<Upwork_Transaction__c> transactionInsertList = new List<Upwork_Transaction__c>();
+        Id redidd = recordid;
+
+        if (contentDocumentId != null) {
+            List<ContentVersion> listToBePassInBatch = [
+                SELECT Id, VersionData
+                FROM ContentVersion
+                WHERE ContentDocumentId = :contentDocumentId
+            ];
+            
+            // Check if the list is empty before accessing the first element
+            if (listToBePassInBatch.isEmpty()) {
+                throw new AuraHandledException('File not processed/Invalid: Unable to retrieve the file.');
+            }
+            
+            Blob csvBlob = listToBePassInBatch[0].VersionData;
+            String csvData = csvBlob.toString();
+            List<String> csvRecordsList = CSVFileReadLWCCntrl.processCsvData(csvData);
+
+            // Check if the CSV file contains any data
+            if (csvRecordsList.isEmpty() || csvRecordsList.size() <= 1) {
+                throw new AuraHandledException('File not processed/Invalid: No data found in the CSV file.');
+            }
+
+            Map<String, Integer> headerMap = new Map<String, Integer>();
+            List<String> headers = csvRecordsList[0].split(',');
+
+            for (Integer h = 0; h < headers.size(); h++) {
+                headerMap.put(headers[h].trim(), h);
+            }
+
+// Step 1: Collect all unique account names from the CSV
+Set<String> accountNamesSet = new Set<String>();
+for (Integer i = 1; i < csvRecordsList.size(); i++) {
+    List<String> csvRowData = csvRecordsList[i].split(',');
+    if (csvRowData.size() >= 6 && headerMap.containsKey('Account Name')) {
+        String accountName = csvRowData[headerMap.get('Account Name')].trim();
+        if (!String.isEmpty(accountName)) {
+            accountNamesSet.add(accountName);
+        }
+    }
+}
+
+// Step 2: Query all accounts in bulk
+Map<String, Id> accountIdMap = new Map<String, Id>();
+if (!accountNamesSet.isEmpty()) {
+    List<Account> accounts = [
+        SELECT Id, Name 
+        FROM Account 
+        WHERE Name IN :accountNamesSet
+    ];
+    for (Account acc : accounts) {
+        accountIdMap.put(acc.Name, acc.Id);
+    }
+}
+
+// Step 3: Process CSV records and use the pre-fetched account IDs
+for (Integer i = 1; i < csvRecordsList.size(); i++) {
+    List<String> csvRowData = csvRecordsList[i].split(',');
+    if (csvRowData.size() >= 6) {
+        for (Integer j = 0; j < csvRowData.size(); j++) {
+            csvRowData[j] = csvRowData[j].trim();
+        }
+
+        if (headerMap.containsKey('Ref ID') && csvRowData[headerMap.get('Ref ID')] != '') {
+            Upwork_Transaction__c transactionObj = new Upwork_Transaction__c();
+            transactionObj.Name = csvRowData[headerMap.get('Ref ID')];
+            transactionObj.Transaction_Date__c = Date.parse(csvRowData[headerMap.get('Date')]);
+            transactionObj.Transaction_Type__c = csvRowData[headerMap.get('Transaction Type')];
+            transactionObj.Transaction_Sub_Type__c = csvRowData[headerMap.get('Type')];
+            transactionObj.Description__c = csvRowData[headerMap.get('Description')];
+
+            // Use the map to find the account ID
+            if (headerMap.containsKey('Account Name') && csvRowData[headerMap.get('Account Name')] != '') {
+                String accountName = csvRowData[headerMap.get('Account Name')];
+                if (accountIdMap.containsKey(accountName)) {
+                    transactionObj.Account_Name1__c = accountIdMap.get(accountName); // Set the Account ID
+                } else {
+                    throw new AuraHandledException('Account not found for name: ' + accountName);
+                }
+            }
+
+            if (headerMap.containsKey('Amount') && csvRowData[headerMap.get('Amount')] != '') {
+                try {
+                    transactionObj.Amount__c = Decimal.valueOf(csvRowData[headerMap.get('Amount')]);
+                } catch (Exception e) {
+                    transactionObj.Amount__c = null;
+                }
+            }
+            transactionInsertList.add(transactionObj);
+        }
+    }
+}
+
+
+            // Check if any records were created
+            if (transactionInsertList.isEmpty()) {
+                throw new AuraHandledException('Records not processed, please check the file.');
+            }
+
+            // Start the batch job if records are valid
+            CSVFileReadBatch batch = new CSVFileReadBatch(transactionInsertList, redidd);
+            Database.executeBatch(batch, 2000);
+            return 'Batch job started successfully with ' + transactionInsertList.size() + ' transactions processed. Check the Files tab for success and error reports.';
+        } else {
+            throw new AuraHandledException('ContentDocumentId is null.');
+        }
+    }
+
+    public static List<String> processCsvData(String csvData) {
+        List<String> lines = new List<String>();
+        Integer startIndex = 0;
+        Integer newLineIndex;
+ 
+        while ((newLineIndex = csvData.indexOf('\n', startIndex)) != -1) {
+            String line = csvData.substring(startIndex, newLineIndex);
+            if (!String.isEmpty(line)) {
+                lines.add(line);
+            }
+            startIndex = newLineIndex + 1;
+        }
+ 
+        if (startIndex < csvData.length()) {
+            String line = csvData.substring(startIndex);
+            if (!String.isEmpty(line)) {
+                lines.add(line);
+            }
+        }
+ 
+        return lines;
+    }
+}
