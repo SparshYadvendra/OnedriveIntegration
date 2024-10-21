@@ -1,0 +1,778 @@
+This is complete integration between salesforce and Onedrive.
+
+Azure setup steps-
+
+Login in Microsoft azure portal - https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade
+
+Now Go to app registration and create an connected app.
+
+Give these api permissions- 
+Files.Read, Files.Read.All, Files.ReadWrite, Files.ReadWrite.All, Files.ReadWrite.All, Files.ReadWrite.AppFolder, Files.ReadWrite.AppFolder, Files.SelectedOperations.Selected, 
+offline_access, Sites.FullControl.All, Sites.Read.All, Sites.ReadWrite.All, User.Read
+
+Now Save the following id-
+Client ID, Client Credential, tenent id
+
+Now Save the following endpoints-
+OAuth 2.0 token endpoint (v2), OAuth 2.0 authorization endpoint (v2)
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Requirement 2-- Now we add one more condition in previous LWC component that it accept Multiple PDF as well upto 10pdf at onces. 
+For e.g PDF name- T123456.pdf, Upwork transaction record names e.g - 123456, onedrive folder name e.g - Bank Transfer for 900000.04 INR to xxxx-0938 Dated 15 Nov 24
+
+Single PDF case-
+When we are uploading PDF called T123456.pdf, then it checks that 123456 record is present in upwork transaction or not, if present then checks Transaction date field of record with latest 
+last onedrive folder name. If the date is lesser then onedrive folder then it uploads pdf in exesting folder and  if the date is greater then it create a new folder and upload the pdf in it.
+
+Onedrive Folder Naming logic- Description field + Dated + Transaction date
+
+Multiple PDF case- If we are uploading 10 pdfs at onces then it checks those 10 records are present or not if present then it exatracts the higest trascation date records from all records then it
+then it check this transaction date with onedrive folder date and same previous logic.
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+We have to create following things-\
+
+Create a object in salesforce-
+Object Name- Access Token(Accesstoken__c)  Field- AccessToken(AccessToken__c)      Data Type-Long Text Area(32768)
+
+Create a Site - 
+Go to setup -> search site -> Inside user interface -> go to site -> Create a new site -> 
+Add your sandbox url just add /test after .com - in my case I have use this URL- (makediansoftechsolutions--account.sandbox.my.salesforce-sites.com/test)
+
+Important part-
+Now add this URL into the microsoft app which we have create earlier, inside the redirect url.
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Now create -
+
+Auth controller-
+
+public class AuthController {
+    public String tokenName { get; set; }
+    public String grantType { get; set; }
+    public String callbackUrl { get; set; }
+    public String authUrl { get; set; }
+    public String accessTokenUrl { get; set; }
+    public String clientId { get; set; }
+    public String clientSecret { get; set; }
+    public String scope { get; set; }
+    public String state { get; set; }
+    public String refreshTokenUrl { get; set; }
+    public String pageUrl { get; set; }
+    public String code { get; set; }
+
+    public AuthController() {
+        tokenName = 'Test1';
+        grantType = 'authorization_code'; // or other types as needed
+        callbackUrl = 'https://makediansoftechsolutions--account.sandbox.my.salesforce-sites.com/test';
+        authUrl = ' add OAuth 2.0 authorization endpoint (v2)';
+        accessTokenUrl = 'add OAuth 2.0 token endpoint (v2)';
+        clientId = 'clientId';
+        clientSecret = 'Add client ID';
+        scope = 'Files.ReadWrite.All';
+        state = '1234'; // Set your state parameter as needed
+        refreshTokenUrl = 'https://login.microsoftonline.com/8c36970b-ea6b-404b-af96-5d1342878bcc/oauth2/v2.0/token';
+        pageUrl = ApexPages.currentPage().getUrl();
+        code = ApexPages.currentPage().getParameters().get('code');
+        system.debug('code: ' + code);
+        system.debug('pageUrl guest user: ' + pageUrl);
+    }
+
+    // Method to initiate OAuth flow
+    public PageReference initiateOAuthFlow() {
+        if (code == null) {
+            String redirectUrl = authUrl + '?client_id=' + clientId +
+                                 '&response_type=code' +
+                                 '&redirect_uri=' + EncodingUtil.urlEncode(callbackUrl, 'UTF-8') +
+                                 '&scope=' + EncodingUtil.urlEncode(scope, 'UTF-8') +
+                                 '&state=' + state;
+
+            // Redirect to the authorization URL
+            system.debug('redirectUrl: ' + redirectUrl);
+            PageReference pageRef = new PageReference(redirectUrl);
+            pageRef.setRedirect(true);
+            return pageRef;
+        } else {
+            requestAccessToken(code);
+            return null;
+        }
+    }
+
+    // Method to exchange code for access token
+    public void requestAccessToken(String authorizationCode) {
+        String requestBody = 'grant_type=' + EncodingUtil.urlEncode(grantType, 'UTF-8') +
+                             '&client_id=' + EncodingUtil.urlEncode(clientId, 'UTF-8') +
+                             '&client_secret=' + EncodingUtil.urlEncode(clientSecret, 'UTF-8') +
+                             '&code=' + EncodingUtil.urlEncode(authorizationCode, 'UTF-8') +
+                             '&redirect_uri=' + EncodingUtil.urlEncode(callbackUrl, 'UTF-8');
+
+        // Create HTTP request
+        HttpRequest req = new HttpRequest();
+        req.setEndpoint(accessTokenUrl);
+        req.setMethod('POST');
+        req.setHeader('Content-Type', 'application/x-www-form-urlencoded');
+        req.setBody(requestBody);
+
+        // Create HTTP response object
+        Http http = new Http();
+        HttpResponse res = http.send(req);
+
+        // Parse and handle the response
+        if (res.getStatusCode() == 200) {
+            String responseBody = res.getBody();
+            system.debug('Response Body: ' + responseBody);
+
+            // Parse the JSON response to get the access token
+            Map<String, Object> jsonResponse = (Map<String, Object>) JSON.deserializeUntyped(responseBody);
+            String accessToken = (String) jsonResponse.get('access_token');
+
+            // Query for all existing Upwork Transaction records
+            List<Accesstoken__c> transactions = [SELECT Id, AccessToken__c FROM Accesstoken__c Where Name = 'Store Access Token'];
+
+            if (!transactions.isEmpty()) {
+                // Update all records with the new access token
+                    transactions[0].AccessToken__c = accessToken;
+
+                // Update the records
+                try {
+                    update transactions; // Use the list of existing records here
+                    system.debug('Access token updated successfully for all records: ' + accessToken);
+                } catch (DmlException e) {
+                    system.debug('Error updating access tokens: ' + e.getMessage());
+                }
+            } else {
+                system.debug('No existing Upwork Transaction records found.');
+            }
+        } else {
+            system.debug('Error in response: ' + res.getStatusCode() + ' - ' + res.getBody());
+        }
+    }
+}
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+For running this code you need to create a VisualForce page-
+
+<apex:page controller="AuthController" action="{!initiateOAuthFlow}">
+    <script>
+        // Print the current URL to the console
+        console.log(window.location.href);
+    </script>
+</apex:page>
+
+
+
+These both will help you to generate access token code and save into the access token field inside access token object which we have created earlier.
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Now creating LWC
+
+HTML
+
+<template>
+    <div style="display: flex;width: 100%;justify-content: space-around;">
+        <lightning-card icon-name="custom:custom18" title="Upwork Transaction Insert and PDF Uploader" style="width:50%">
+            <div style="margin-left: 3%">
+                <lightning-file-upload accept={acceptedPDFFormats} 
+                                       label="Attach File" 
+                                       multiple="false" 
+                                       onuploadfinished={uploadFileHandler} 
+                                       record-id={recordId}></lightning-file-upload>
+                <template if:true={iframeSrc}>
+                    <iframe src={iframeSrc} style="display:none;" width="100%" height="500px"></iframe>
+                </template>
+            </div>
+            <div if:true={error}>
+                {error.message}
+            </div><br/>
+            <div if:true={data}>
+                <lightning-datatable columns={columnsAccount} 
+                                     data={data} 
+                                     hide-checkbox-column="true" 
+                                     key-field="id"></lightning-datatable>
+            </div>
+        </lightning-card>
+    </div>
+</template>
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Java Script-
+
+import { LightningElement, track, api } from 'lwc';
+import { ShowToastEvent } from 'lightning/platformShowToastEvent';
+import csvFileRead from '@salesforce/apex/CSVFileReadLWCCntrl.startCSVImportBatch';
+import checkExistingRecords from '@salesforce/apex/UpworkTransactionController.checkExistingRecords';
+
+const transactionObj = [
+    // Your existing transactionObj definitions
+];
+
+export default class FileUploaderLWC extends LightningElement {
+    @track errorMessage; // Update to errorMessage
+    @track successMessage; // New property for success message
+    @track transactionObj = transactionObj;
+    @api recordId;
+    @track error;
+    @track data;
+ 
+
+    get acceptedFormats() {
+        return ['.csv', '.pdf'];
+    }
+connectedCallback() {
+    this.iframeSrc = '/apex/UpworkTransaction';
+}
+
+    uploadFileHandler(event) {
+    const uploadedFiles = event.detail.files;
+    console.log('uploadedFiles', Array.from(uploadedFiles));
+
+    // Check if files were uploaded
+    if (uploadedFiles.length === 0) {
+        return; // Exit if no files are uploaded
+    }
+
+    // Map to get document IDs and check file type
+    const fileDocumentIds = uploadedFiles.map(file => file.documentId);
+    const isCsvFile = uploadedFiles.some(file => file.mimeType ==='text/csv');
+
+    // Handle CSV file upload
+    if (isCsvFile) {
+        csvFileRead({ contentDocumentId: fileDocumentIds[0], recordid: this.recordId }) // assuming you want the first CSV file
+            .then(result => {
+                this.successMessage = result; // Assign success message
+                this.errorMessage = undefined; // Clear any previous error messages
+
+                this.dispatchEvent(
+                    new ShowToastEvent({
+                        title: 'Success!!',
+                        message: result,
+                        variant: 'success',
+                    }),
+                );
+            })
+            .catch(error => {
+                // Capture the custom error message from the Apex AuraHandledException
+                const errorMessage = error.body.message || 'Unknown error occurred';
+                console.log('Error log:', errorMessage);
+
+                this.errorMessage = errorMessage; // Assign error message
+                this.successMessage = undefined; // Clear any previous success messages
+
+                this.dispatchEvent(
+                    new ShowToastEvent({
+                        title: 'Error!!',
+                        message: errorMessage,
+                        variant: 'error',
+                    }),
+                );
+            });
+    } else {
+        // Handle PDF file upload
+        // Call the checkExistingRecords method with the array of file document IDs
+       checkExistingRecords({ contentDocumentId: fileDocumentIds })
+    .then(result => {
+        this.data = result;
+        console.log('result:', result); 
+
+        // Handle Success PDFs
+        if (result['Success PDF'] && result['Success PDF'].length > 0) {
+            const successIds = result['Success PDF'].join(', '); // Join IDs into a single string
+            this.dispatchEvent(
+                new ShowToastEvent({
+                    title: 'Success!',
+                    message: `Successfully retrieved record IDs: ${successIds}`,
+                    variant: 'success',
+                }),
+            );
+        }
+
+        // Handle Failed PDFs
+       if (result['Failed PDF'] && result['Failed PDF'].length > 0) {
+            const failedIds = result['Failed PDF'].join(', '); // Join IDs into a single string
+            this.dispatchEvent(
+                new ShowToastEvent({
+                    title: 'Error!',
+                    message: `Failed to retrieve record IDs: ${failedIds}`,
+                    variant: 'error',
+                }),
+            );
+        }
+
+
+        // Open the Visualforce page in a new tab
+        this.iframeSrc = '/apex/UpworkTransaction';
+    })
+    .catch(error => {
+        this.error = error.body.message;
+        console.log('error:', this.error); 
+
+        // Show generic error toast message
+        this.dispatchEvent(
+            new ShowToastEvent({
+                title: 'Error!',
+                message: this.error || 'An error occurred while retrieving records.',
+                variant: 'error',
+            }),
+        );
+    });
+
+}
+    }
+
+}
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+XML-
+
+<?xml version="1.0" encoding="UTF-8"?>
+<LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata" fqn="fileUploader">
+    <apiVersion>57.0</apiVersion>
+    <isExposed>true</isExposed>
+	<targets>
+		<target>lightning__HomePage</target>
+		<target>lightning__RecordPage</target>
+		<target>lightning__Tab</target>
+	</targets>
+</LightningComponentBundle>
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Apex controller-
+
+
+public class UpworkTransactionController {
+    public Static  List<ContentVersion> listToBePassInBatch = new  List<ContentVersion>();
+    public static  Set<String> pdfFileNameSet = new Set<String>();
+
+   
+
+    @AuraEnabled
+public static map<string,List<String>> checkExistingRecords(List<String> contentDocumentId) {
+
+    map<string,List<String>> FinalPdfNameReturn = new map<string,List<String>> ();
+    System.debug('contentDocumentId111111111'+contentDocumentId);
+    List<Upwork_Transaction__c> existingRecords = new List<Upwork_Transaction__c>();
+
+    if (contentDocumentId.isEmpty()) {
+        throw new AuraHandledException('ContentDocumentId is null.');
+    }
+
+    listToBePassInBatch = [
+        SELECT Id, VersionData, Title, PathOnClient 
+        FROM ContentVersion 
+        WHERE ContentDocumentId IN :contentDocumentId
+    ];
+
+    if (listToBePassInBatch.isEmpty()) {
+        System.debug('No ContentVersion found for ContentDocumentId: ' + contentDocumentId);
+       // return existingRecords;
+    }
+
+    for(ContentVersion con : listToBePassInBatch){
+        String numericPart = con.Title;
+        String pdfFileName = (String)numericPart.replaceAll('\\D+', '');
+        pdfFileNameSet.add(pdfFileName);
+    }
+
+    existingRecords = [
+        SELECT Id, Name, Transaction_Type__c, Transaction_Date__c, Access_Token__c, LastModifiedById, LastModifiedDate,	Description__c,	Invoice_Link__c
+        FROM Upwork_Transaction__c
+        WHERE Name IN :pdfFileNameSet
+        ORDER BY Transaction_Date__c DESC
+        LIMIT 1
+    ];
+      String accessToken;
+     List<Accesstoken__c> transactions = [SELECT Id, AccessToken__c FROM Accesstoken__c Where Name = 'Store Access Token'];
+     if(!transactions.isEmpty()){
+        accessToken =transactions[0].AccessToken__c;
+     }
+
+    if (!existingRecords.isEmpty()) {
+        System.debug('Existing records found based on PDF file name: ' + existingRecords.size());
+
+        // Collect Access Tokens and formatted Dates using a map to store access tokens
+        Map<String, String> accessTokenMap = new Map<String, String>();
+        List<String> formattedTransactionDates = new List<String>();
+        
+        // Always take the latest record (the first one after sorting)
+        Upwork_Transaction__c latestRecord = existingRecords[0];
+        System.debug('Latest Record: ' + latestRecord.Name + ', LastModifiedDate: ' + latestRecord.LastModifiedDate);
+
+        // Format the Transaction_Date__c
+        if (latestRecord.Transaction_Date__c != null) {
+            DateTime transactionDateTime = DateTime.newInstance(latestRecord.Transaction_Date__c, Time.newInstance(0, 0, 0, 0));
+            String formattedDate = transactionDateTime.format('dd MMM yy');
+            formattedTransactionDates.add(formattedDate); // Add formatted String to a new list
+            System.debug('formattedTransactionDates ' + formattedDate);
+        } else {
+            System.debug('Transaction_Date__c is null for record: ' + latestRecord.Name);
+        }
+           // Store the description for the latest record
+        String description = latestRecord.Description__c;
+        String invoice = latestRecord.ID;
+        System.debug('invoice ' + invoice);
+        // Store the access token for the latest record
+
+        accessTokenMap.put(latestRecord.Id, accessToken);
+        System.debug('Access Token for Latest Record: ' + accessToken);
+        
+        // Retrieve folders using the access token and formatted transaction dates
+       FinalPdfNameReturn= retrieveFolders(formattedTransactionDates, accessToken,  description, invoice);
+        
+        
+            } else
+             //Showing an error message which contains the unprocessed PDF IDs
+             {
+            List<String> pdfFileNames = new List<String>();
+
+            for(ContentVersion con : listToBePassInBatch) {
+                String numericPart = con.Title;
+                String pdfFileName = numericPart.replaceAll('\\D+', '');
+                pdfFileNames.add(pdfFileName);
+            }
+            System.debug('pdfFileNames ' + pdfFileNames);
+            // You can choose to throw an exception after collecting all names or process further
+            if (pdfFileNames.isEmpty()) {
+                throw new AuraHandledException('No valid PDF file names found.');
+            } else {
+                // Optionally, you can throw an exception with all names concatenated
+                throw new AuraHandledException('Record not found for names: ' + String.join(pdfFileNames, ', '));
+            }
+                }
+
+ 
+    return FinalPdfNameReturn;
+}
+
+
+
+    
+ @AuraEnabled
+public static map<string,List<String>> retrieveFolders(List<String> formattedTransactionDates, String accessToken, String description, String invoice) {
+    String endpoint = 'https://graph.microsoft.com/v1.0/drives/b!PjgkC96640OkoHP7mBiLLsq4SX6d0H1FozLI35hZ5GCNoW1ELSDYTZaUXsUYCCoF/root/children';
+    
+    Http http = new Http();
+    HttpRequest request = new HttpRequest();
+    request.setEndpoint(endpoint);
+    request.setMethod('GET');
+    request.setHeader('Authorization', 'Bearer ' + accessToken);
+    request.setHeader('accept', 'application/json');
+    request.setHeader('Content-Type', 'application/json');
+    map<string,List<String>> PdfNameReturn = new map<string,List<String>> ();
+    try {
+        HttpResponse response = http.send(request);
+        System.debug('Retrieve Folders Response Status: ' + response.getStatusCode());
+
+        if (response.getStatusCode() == 200) {
+            System.debug('Response Body: ' + response.getBody());
+            Map<String, Object> responseBody = (Map<String, Object>) JSON.deserializeUntyped(response.getBody());
+            List<Object> folders = (List<Object>) responseBody.get('value');
+
+            System.debug('Total folders retrieved: ' + folders.size());
+
+            Date latestFolderDate = null;
+
+            // Initialize variables to store the latest folder details
+            String latestFolderId = null;
+            String latestFolderName = null;
+            String latestLastModifiedDate = null;
+            String lastPart = null; // Declare lastPart here
+
+            // Loop through the folders
+            for (Object folder : folders) {
+                Map<String, Object> folderDetails = (Map<String, Object>) folder;
+
+                if (folderDetails.get('folder') != null) {
+                    String folderName = (String) folderDetails.get('name');
+                    String folderId = (String) folderDetails.get('id');
+                    String lastModified = (String) folderDetails.get('lastModifiedDateTime');
+
+                    //System.debug('Folder Name: ' + folderName + ', Folder ID: ' + folderId + ', Last Modified: ' + lastModified);
+
+                    // Split to extract the date part
+                    String[] nameParts = folderName.split(' Dated ');
+                    if (nameParts.size() > 1) {
+                        String datePart = nameParts[1];
+                    //    System.debug('Extracted Date Part from Folder Name: ' + datePart);
+                        
+                        // Check if the lastModifiedDateTime is greater than the latestLastModifiedDate
+                        if (latestLastModifiedDate == null || lastModified.compareTo(latestLastModifiedDate) > 0) {
+                            // Update the latest folder details
+                            latestFolderId = folderId;
+                            latestFolderName = folderName;
+                            latestLastModifiedDate = lastModified;
+
+                            // Split to extract the last part of the latest folder name
+                            String[] latestNameParts = latestFolderName.split(' Dated '); // Adjust the delimiter as needed
+                            lastPart = latestNameParts[1]; // Get the last part
+                            System.debug('Last Part of the Latest Folder Name: ' + lastPart);
+                        }
+                    }
+                }
+            }
+
+            // After the loop, you can use latestFolderId, latestFolderName, latestLastModifiedDate, and lastPart
+            System.debug('Latest Folder Name: ' + latestFolderName + ', Latest Folder ID: ' + latestFolderId + ', Latest Last Modified: ' + latestLastModifiedDate);
+          //  System.debug('Out Side For');
+            System.debug('formattedTransactionDates'+ formattedTransactionDates);
+
+
+            for (String transactionDateStr : formattedTransactionDates) {
+
+                system.debug('transactionDate1>>'+transactionDateStr);
+                Date transactionDate =convertStringTodate(transactionDateStr); // Assuming the transaction date is formatted properly
+
+                if (lastPart != '') { // Ensure lastPart is not null before parsing
+               
+                    Date lastPartDate = convertStringTodate(lastPart); // Parse lastPart for comparison
+                        set<String> setIdIds = new set<String>();
+                         List<Upwork_Transaction__c> transactionToUpdate =[SELECT Id, Name FROM Upwork_Transaction__c];
+                        System.debug('transactionToUpdate123'+transactionToUpdate);
+                        for(Upwork_Transaction__c up :transactionToUpdate){
+                            setIdIds.add(up.Name);
+                          //  system.debug('setIdIds'+setIdIds);
+
+                        }
+
+                    if (transactionDate > lastPartDate) {
+                        List<String> pdfFileNamesInSet = new List<String>(); // List for pdfFileNames in set
+                        List<String> pdfFileNamesNotInSet = new List<String>(); // List for pdfFileNames not in set
+                        System.debug('transactionDate > lastPartDate if Block');
+                        System.debug('Creating folder for Transaction Date: ' + transactionDate);
+                        String newFolderId = createFolder(description, transactionDateStr, accessToken);
+                        for(ContentVersion con : listToBePassInBatch){
+                             String numericPart = con.PathOnClient;
+                             String pdfFileName = (String)numericPart.replaceAll('\\D+', '');
+                            if (setIdIds.contains(pdfFileName)) {                                 
+                                 pdfFileNamesInSet.add(pdfFileName);                                                      
+                                 uploadPDF(con.VersionData, con.PathOnClient, accessToken, transactionDateStr, newFolderId, invoice);
+                            } else {
+                                system.debug('pdfFileName'+pdfFileName);
+                                pdfFileNamesNotInSet.add(pdfFileName);
+                            }
+                        }
+
+                        if (!pdfFileNamesNotInSet.isEmpty()) {
+                        String customErrorMessage = 'The following pdfFileNames are present in the set but not in the "not in set" list: ' + pdfFileNamesNotInSet;
+                        system.debug(customErrorMessage);
+                    } else {
+                        system.debug('No differences found between the two lists.');
+                    }
+                        // After the loop, you can use both lists for further processing
+                        system.debug('pdfFileNames in set: ' + pdfFileNamesInSet);
+                        system.debug('pdfFileNames not in set: ' + pdfFileNamesNotInSet);
+                        PdfNameReturn.put('Success PDF',pdfFileNamesInSet);
+                        PdfNameReturn.put('Failed PDF',pdfFileNamesNotInSet);
+
+
+                    } else {
+                        List<String> pdfFileNamesInSet = new List<String>(); // List for pdfFileNames in set
+                        List<String> pdfFileNamesNotInSet = new List<String>(); // List for pdfFileNames not in set
+                        
+                        for(ContentVersion con : listToBePassInBatch) {
+                            String numericPart = con.PathOnClient;
+                            String pdfFileName = (String)numericPart.replaceAll('\\D+', '');                          
+                            if (setIdIds.contains(pdfFileName)) {
+                                pdfFileNamesInSet.add(pdfFileName); // Add to list for names in set
+                                uploadPDF(con.VersionData, con.PathOnClient, accessToken, latestFolderId, latestFolderId, invoice);
+                            } else {
+                                system.debug('pdfFileName not in set: ' + pdfFileName);
+                                pdfFileNamesNotInSet.add(pdfFileName); // Add to list for names not in set
+                            }
+                        }
+                        if (!pdfFileNamesNotInSet.isEmpty()) {
+                        String customErrorMessage = 'The following pdfFileNames are present in the set but not in the "not in set" list: ' + pdfFileNamesNotInSet;
+                        system.debug(customErrorMessage);
+                    } else {
+                        system.debug('No differences found between the two lists.');
+                    }
+                        // After the loop, you can use both lists for further processing
+                        system.debug('pdfFileNames in set: ' + pdfFileNamesInSet);
+                        system.debug('pdfFileNames not in set: ' + pdfFileNamesNotInSet);
+                        PdfNameReturn.put('Success PDF',pdfFileNamesInSet);
+                        PdfNameReturn.put('Failed PDF',pdfFileNamesNotInSet);
+                                            }
+                                        }                
+                                    }
+                                } else {
+                                    System.debug('Error retrieving folders: ' + response.getStatus() + ' - ' + response.getBody());
+                                }
+                            } catch (Exception e) {
+                                System.debug('Exception occurred: ' + e.getMessage());
+                            }
+                        return PdfNameReturn;
+                        }
+
+
+    // Method to upload the PDF file to the specified folder
+    @future(callout=true)
+   public static void uploadPDF(Blob pdfBlob, String pdfullname, String accessToken, String datePart, String folderId,String invoice ) {
+    String uploadEndpoint = 'https://graph.microsoft.com/v1.0/drives/b!PjgkC96640OkoHP7mBiLLsq4SX6d0H1FozLI35hZ5GCNoW1ELSDYTZaUXsUYCCoF/items/' + folderId + ':/' + pdfullname + ':/content';
+
+    Http http = new Http();
+    HttpRequest request = new HttpRequest();
+    request.setEndpoint(uploadEndpoint);
+    request.setMethod('PUT');
+    request.setHeader('Authorization', 'Bearer ' + accessToken);
+    request.setHeader('Content-Type', 'application/pdf');
+    request.setHeader('Accept', 'application/json');
+    request.setBodyAsBlob(pdfBlob);
+
+    try {
+        HttpResponse response = http.send(request);
+        System.debug('Upload PDF Response Status: ' + response.getStatusCode());
+
+        if (response.getStatusCode() == 201 || response.getStatusCode() == 200) {
+            System.debug('Successfully uploaded PDF: ' + pdfullname);
+            System.debug('Success uploading PDF: ' + response.getStatus() + ' - ' + response.getBody());
+
+            // Extract the link from the response
+            Map<String, Object> responseBody = (Map<String, Object>) JSON.deserializeUntyped(response.getBody());
+            String pdfLink = (String) responseBody.get('webUrl'); // or the appropriate key for the link
+
+    if (pdfLink != null) {
+        updateInvoiceLink(pdfLink,pdfullname);
+    }
+
+
+            // Output the link
+            System.debug('PDF Link: ' + pdfLink);
+        } else {
+            System.debug('Error uploading PDF: ' + response.getStatus() + ' - ' + response.getBody());
+        }
+    } catch (Exception e) {
+        System.debug('Exception occurred while uploading PDF: ' + e.getMessage());
+    }
+}
+
+     private static void updateInvoiceLink(String pdfLink, String pdfullname){
+        String numericPart = pdfullname;
+        String pdfFileName = (String)numericPart.replaceAll('\\D+', '');
+        system.debug('pdfFileName' +pdfFileName);
+        List<Upwork_Transaction__c> updateList = new  List<Upwork_Transaction__c> ();
+        List<Upwork_Transaction__c> transactionToUpdate = [SELECT Id, Name FROM Upwork_Transaction__c WHERE Name =: pdfFileName ];
+        System.debug('transactionToUpdate'+transactionToUpdate);
+        If(!transactionToUpdate.isEmpty()){
+            for(Upwork_Transaction__c upWork : transactionToUpdate){
+                    Upwork_Transaction__c upworkTransation = new Upwork_Transaction__c();
+                    upworkTransation.Id =upWork.Id;
+                    upworkTransation.Invoice_Link__c =pdfLink;
+                    updateList.add(upworkTransation);
+            }
+        }
+        if(!updateList.isEmpty()){
+           update updateList;
+           system.debug('updateList'+updateList);
+        }
+           
+
+     }
+
+    // Method to create a new folder in OneDrive
+    public static String createFolder(String description, String transactionDateStr, String accessToken) {
+    // Parse the transaction date string to a Date object
+   
+    
+    // Format the date as 'YYYY-MM-DD'
+    String formattedDate = transactionDateStr;
+    
+    // Construct the folder name using the description and formatted date
+    String folderName = description + ' Dated ' + formattedDate;
+    
+    // Sanitize the folder name
+ // Optionally replace spaces with underscores
+    
+    String endpoint = 'https://graph.microsoft.com/v1.0/drives/b!PjgkC96640OkoHP7mBiLLsq4SX6d0H1FozLI35hZ5GCNoW1ELSDYTZaUXsUYCCoF/root/children';
+    
+    Http http = new Http();
+    HttpRequest request = new HttpRequest();
+    request.setEndpoint(endpoint);
+    request.setMethod('POST');
+    request.setHeader('Authorization', 'Bearer ' + accessToken);
+    request.setHeader('accept', 'application/json');
+    request.setHeader('Content-Type', 'application/json');
+
+    // Prepare the request body for creating a new folder
+    Map<String, Object> folderBody = new Map<String, Object>();
+    folderBody.put('name', folderName);
+    folderBody.put('folder', new Map<String, Object>()); // Indicates this is a folder
+
+    request.setBody(JSON.serialize(folderBody));
+
+    try {
+        HttpResponse response = http.send(request);
+        System.debug('Create Folder Response Status: ' + response.getStatusCode());
+
+        if (response.getStatusCode() == 201) {
+            System.debug('Successfully created folder: ' + folderName);
+            Map<String, Object> responseBody = (Map<String, Object>) JSON.deserializeUntyped(response.getBody());
+            return (String) responseBody.get('id'); // Return the folder ID
+        } else {
+            System.debug('Error creating folder: ' + response.getStatus() + ' - ' + response.getBody());
+        }
+    } catch (Exception e) {
+        System.debug('Exception occurred while creating folder: ' + e.getMessage());
+    }
+    return null; // Return null if the folder creation fails
+}
+
+
+    // Placeholder for PDF parsing method
+    public static String parsePDF(Blob pdfBlob) {
+        // Implement PDF parsing logic here
+        return ''; // Replace with actual parsed content
+    }
+
+    public static List<String> extractTransactionTypesFromPDF(String pdfContent) {
+        // Implement logic to extract transaction types
+        return new List<String>(); // Return the extracted types
+    }
+
+    public static List<Date> extractTransactionDatesFromPDF(String pdfContent) {
+        // Implement logic to extract transaction dates
+        return new List<Date>(); // Return the extracted dates
+    }
+
+    private static Date convertStringTodate(String dateString1){
+        String dateString = dateString1;
+
+// Split the string into components
+        String[] parts = dateString.split(' ');
+
+        // Create the Date object
+        Integer day = Integer.valueOf(parts[0]);
+        String monthStr = parts[1];
+        Integer year = Integer.valueOf(parts[2]) + 2000; // Adjusting to full year format
+
+        // Map month names to month numbers
+        Map<String, Integer> monthMap = new Map<String, Integer>{
+            'Jan' => 1,
+            'Feb' => 2,
+            'Mar' => 3,
+            'Apr' => 4,
+            'May' => 5,
+            'Jun' => 6,
+            'Jul' => 7,
+            'Aug' => 8,
+            'Sep' => 9,
+            'Oct' => 10,
+            'Nov' => 11,
+            'Dec' => 12
+        };
+
+        // Get the month number
+        Integer month = monthMap.get(monthStr);
+
+        // Create the Date object
+        Date convertedDate = Date.newInstance(year, month, day);
+
+        // Output the result
+        System.debug('Converted Date: ' + convertedDate);
+        return convertedDate;
+
+            }
+
+
+}
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
