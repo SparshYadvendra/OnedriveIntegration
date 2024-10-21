@@ -4,15 +4,15 @@ Requirement 1-----We have create a LWC component which can insert record via CSV
 Salesforce Object and fields,
 Object Name - Upwork Transaction (Upwork_Transaction__c)
 Fields- 
-(Field Names)             (API Names)             (Data Type)
-Reference Id	              Name	                  Text(80) --- We have added a validation in which we can only enter number in this field
-Transaction Date	     Transaction_Date__c	        Date ---      Required field
-Transaction Type	     Transaction_Type__c	        Picklist(Debit, Credit)
-Transaction Sub-Type   Transaction_Sub_Type__c	    Picklist(Membership Fee, Service Fee, WHT, Withdrawal, Withdrawal Fee, Fixed Price, Hourly)
-Invoice Link	         Invoice_Link__c	            URL(255)
-Account Name	         Account_Name1__c	            Lookup(Account)			
-Amount	               Amount__c	                  Currency(18, 0)
-Description	           Description__c	              Text Area(255) -- Required field
+(Field Names)                 (API Names)                 (Data Type)
+Reference Id	                 Name	                  Text(80) --- We have added a validation in which we can only enter number in this field
+Transaction Date	     Transaction_Date__c	  Date ---      Required field
+Transaction Type	     Transaction_Type__c	  Picklist(Debit, Credit)
+Transaction Sub-Type         Transaction_Sub_Type__c	  Picklist(Membership Fee, Service Fee, WHT, Withdrawal, Withdrawal Fee, Fixed Price, Hourly)
+Invoice Link	             Invoice_Link__c	          URL(255)
+Account Name	             Account_Name1__c	          Lookup(Account)			
+Amount	                     Amount__c	                  Currency(18, 0)
+Description	             Description__c	          Text Area(255) -- Required field
 
 CSV files fields-
 Account Name	          Ref ID	          Type	        Description	        Amount	       Date	         Transaction Type
