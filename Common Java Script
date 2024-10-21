@@ -1,0 +1,123 @@
+import { LightningElement, track, api } from 'lwc';
+import { ShowToastEvent } from 'lightning/platformShowToastEvent';
+import csvFileRead from '@salesforce/apex/CSVFileReadLWCCntrl.startCSVImportBatch';
+import checkExistingRecords from '@salesforce/apex/UpworkTransactionController.checkExistingRecords';
+
+const transactionObj = [
+    // Your existing transactionObj definitions
+];
+
+export default class FileUploaderLWC extends LightningElement {
+    @track errorMessage; // Update to errorMessage
+    @track successMessage; // New property for success message
+    @track transactionObj = transactionObj;
+    @api recordId;
+    @track error;
+    @track data;
+ 
+
+    get acceptedFormats() {
+        return ['.csv', '.pdf'];
+    }
+connectedCallback() {
+    this.iframeSrc = '/apex/UpworkTransaction';
+}
+
+    uploadFileHandler(event) {
+    const uploadedFiles = event.detail.files;
+    console.log('uploadedFiles', Array.from(uploadedFiles));
+
+    // Check if files were uploaded
+    if (uploadedFiles.length === 0) {
+        return; // Exit if no files are uploaded
+    }
+
+    // Map to get document IDs and check file type
+    const fileDocumentIds = uploadedFiles.map(file => file.documentId);
+    const isCsvFile = uploadedFiles.some(file => file.mimeType ==='text/csv');
+
+    // Handle CSV file upload
+    if (isCsvFile) {
+        csvFileRead({ contentDocumentId: fileDocumentIds[0], recordid: this.recordId }) // assuming you want the first CSV file
+            .then(result => {
+                this.successMessage = result; // Assign success message
+                this.errorMessage = undefined; // Clear any previous error messages
+
+                this.dispatchEvent(
+                    new ShowToastEvent({
+                        title: 'Success!!',
+                        message: result,
+                        variant: 'success',
+                    }),
+                );
+            })
+            .catch(error => {
+                // Capture the custom error message from the Apex AuraHandledException
+                const errorMessage = error.body.message || 'Unknown error occurred';
+                console.log('Error log:', errorMessage);
+
+                this.errorMessage = errorMessage; // Assign error message
+                this.successMessage = undefined; // Clear any previous success messages
+
+                this.dispatchEvent(
+                    new ShowToastEvent({
+                        title: 'Error!!',
+                        message: errorMessage,
+                        variant: 'error',
+                    }),
+                );
+            });
+    } else {
+        // Handle PDF file upload
+        // Call the checkExistingRecords method with the array of file document IDs
+       checkExistingRecords({ contentDocumentId: fileDocumentIds })
+    .then(result => {
+        this.data = result;
+        console.log('result:', result); 
+
+        // Handle Success PDFs
+        if (result['Success PDF'] && result['Success PDF'].length > 0) {
+            const successIds = result['Success PDF'].join(', '); // Join IDs into a single string
+            this.dispatchEvent(
+                new ShowToastEvent({
+                    title: 'Success!',
+                    message: `Successfully retrieved record IDs: ${successIds}`,
+                    variant: 'success',
+                }),
+            );
+        }
+
+        // Handle Failed PDFs
+       if (result['Failed PDF'] && result['Failed PDF'].length > 0) {
+            const failedIds = result['Failed PDF'].join(', '); // Join IDs into a single string
+            this.dispatchEvent(
+                new ShowToastEvent({
+                    title: 'Error!',
+                    message: `Failed to retrieve record IDs: ${failedIds}`,
+                    variant: 'error',
+                }),
+            );
+        }
+
+
+        // Open the Visualforce page in a new tab
+        this.iframeSrc = '/apex/UpworkTransaction';
+    })
+    .catch(error => {
+        this.error = error.body.message;
+        console.log('error:', this.error); 
+
+        // Show generic error toast message
+        this.dispatchEvent(
+            new ShowToastEvent({
+                title: 'Error!',
+                message: this.error || 'An error occurred while retrieving records.',
+                variant: 'error',
+            }),
+        );
+    });
+
+}
+    }
+
+}
