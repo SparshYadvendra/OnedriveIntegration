@@ -295,7 +295,7 @@ public static map<string,List<String>> checkExistingRecords(List<String> content
     
  @AuraEnabled
 public static map<string,List<String>> retrieveFolders(List<String> formattedTransactionDates, String accessToken, String description, String invoice) {
-    String endpoint = 'https://graph.microsoft.com/v1.0/drives/b!PjgkC96640OkoHP7mBiLLsq4SX6d0H1FozLI35hZ5GCNoW1ELSDYTZaUXsUYCCoF/root/children';
+    String endpoint = 'https://graph.microsoft.com/v1.0/drives/Add Drive ID Here/root/children';
     
     Http http = new Http();
     HttpRequest request = new HttpRequest();
@@ -453,7 +453,7 @@ public static map<string,List<String>> retrieveFolders(List<String> formattedTra
     // Method to upload the PDF file to the specified folder
     @future(callout=true)
    public static void uploadPDF(Blob pdfBlob, String pdfullname, String accessToken, String datePart, String folderId,String invoice ) {
-    String uploadEndpoint = 'https://graph.microsoft.com/v1.0/drives/b!PjgkC96640OkoHP7mBiLLsq4SX6d0H1FozLI35hZ5GCNoW1ELSDYTZaUXsUYCCoF/items/' + folderId + ':/' + pdfullname + ':/content';
+    String uploadEndpoint = 'https://graph.microsoft.com/v1.0/drives/Add Drive ID here/items/' + folderId + ':/' + pdfullname + ':/content';
 
     Http http = new Http();
     HttpRequest request = new HttpRequest();
@@ -528,7 +528,7 @@ public static map<string,List<String>> retrieveFolders(List<String> formattedTra
     // Sanitize the folder name
  // Optionally replace spaces with underscores
     
-    String endpoint = 'https://graph.microsoft.com/v1.0/drives/b!PjgkC96640OkoHP7mBiLLsq4SX6d0H1FozLI35hZ5GCNoW1ELSDYTZaUXsUYCCoF/root/children';
+    String endpoint = 'https://graph.microsoft.com/v1.0/drives/Add drive ID here/root/children';
     
     Http http = new Http();
     HttpRequest request = new HttpRequest();
