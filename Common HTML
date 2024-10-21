@@ -1,0 +1,25 @@
+<template>
+    <div style="display: flex;width: 100%;justify-content: space-around;">
+        <lightning-card icon-name="custom:custom18" title="Upwork Transaction Insert and PDF Uploader" style="width:50%">
+            <div style="margin-left: 3%">
+                <lightning-file-upload accept={acceptedPDFFormats} 
+                                       label="Attach File" 
+                                       multiple="false" 
+                                       onuploadfinished={uploadFileHandler} 
+                                       record-id={recordId}></lightning-file-upload>
+                <template if:true={iframeSrc}>
+                    <iframe src={iframeSrc} style="display:none;" width="100%" height="500px"></iframe>
+                </template>
+            </div>
+            <div if:true={error}>
+                {error.message}
+            </div><br/>
+            <div if:true={data}>
+                <lightning-datatable columns={columnsAccount} 
+                                     data={data} 
+                                     hide-checkbox-column="true" 
+                                     key-field="id"></lightning-datatable>
+            </div>
+        </lightning-card>
+    </div>
+</template>
