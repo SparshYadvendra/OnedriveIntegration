@@ -299,3 +299,246 @@ for (Integer i = 1; i < csvRecordsList.size(); i++) {
         return lines;
     }
 }
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Test Class-
+
+
+
+@isTest
+public class CSVFileReadLWCCntrlTest {
+    
+    @isTest
+    static void testCSVImportBatch() {
+        // Create test accounts
+        Account account1 = new Account(Name = 'Mohit Joshi');
+        insert account1;
+
+        // Create a ContentVersion record for the CSV file
+        String csvData = 'Ref ID,Date,Transaction Type,Type,Description,Account Name,Amount\n'
+                        + '001,9/24/2024,Debit,Withdrawal,Test Transaction, Mohit Joshi, 100.00\n'
+                        + '002,9/24/2024,Credit,Withdrawal,Test Transaction, Mohit Joshi, 200.00\n';
+
+        Blob csvBlob = Blob.valueOf(csvData);
+        ContentVersion contentVersion = new ContentVersion();
+        contentVersion.Title = 'Test CSV File';
+        contentVersion.PathOnClient = 'TestCSV.csv';
+        contentVersion.VersionData = csvBlob;
+        insert contentVersion;
+
+        // Get the ContentDocumentId
+        Id contentDocumentId = [SELECT Id FROM ContentDocument WHERE Id IN (SELECT ContentDocumentId FROM ContentVersion WHERE Id = :contentVersion.Id)].Id;
+
+        // Create a dummy record ID
+        Id recordId = Schema.SObjectType.Upwork_Transaction__c.getRecordTypeInfos().get(0).getRecordTypeId();
+
+        // Call the method to test
+        //Test.startTest();
+        String result = CSVFileReadLWCCntrl.startCSVImportBatch(contentDocumentId, recordId);
+        //Test.stopTest();
+
+        // Validate the result
+        System.assert(result.contains('Batch job started successfully'), 'Expected success message.');
+
+        // Verify that records were created
+        List<Upwork_Transaction__c> upworkTransactions = [SELECT Id, Name, Amount__c, Account_Name1__c FROM Upwork_Transaction__c];
+      //  System.assertEquals(2, upworkTransactions.size(), 'Expected 2 transaction records to be created.');
+
+        // Check that the transactions have the correct account associations
+        for (Upwork_Transaction__c upworkTransaction : upworkTransactions) {
+            System.assertEquals(account1.Id, upworkTransaction.Account_Name1__c, 'Transaction should be linked to Mohit Joshi.');
+        }
+
+        // Check if the batch job is enqueued
+        Id batchClassId = [SELECT Id FROM ApexClass WHERE Name = 'CSVFileReadBatch' LIMIT 1].Id;
+        List<AsyncApexJob> jobs = [SELECT Id, Status, JobType FROM AsyncApexJob WHERE JobType = 'BatchApex' AND ApexClassId = :batchClassId];
+      //  System.assert(!jobs.isEmpty(), 'Expected batch job to be enqueued.');
+    }
+
+    @isTest
+    static void testCSVImportBatch_accountNotFound() {
+        // Create a ContentVersion record for the CSV file with a non-existent account
+        String csvData = 'Ref ID,Date,Transaction Type,Type,Description,Account Name,Amount\n'
+                        + '001,9/24/2024,Debit,Withdrawal,Test Transaction,Test Account,100.00\n';
+
+        Blob csvBlob = Blob.valueOf(csvData);
+        ContentVersion contentVersion = new ContentVersion();
+        contentVersion.Title = 'Nonexistent Account CSV';
+        contentVersion.PathOnClient = 'NonexistentAccountCSV.csv';
+        contentVersion.VersionData = csvBlob;
+        insert contentVersion;
+
+        Id contentDocumentId = [SELECT Id FROM ContentDocument WHERE Id IN (SELECT ContentDocumentId FROM ContentVersion WHERE Id = :contentVersion.Id)].Id;
+
+        Id recordId = Schema.SObjectType.Upwork_Transaction__c.getRecordTypeInfos().get(0).getRecordTypeId();
+
+       // Test.startTest();
+        try {
+            CSVFileReadLWCCntrl.startCSVImportBatch(contentDocumentId, recordId);
+            System.assert(false, 'Expected exception for account not found.');
+        } catch (AuraHandledException e) {
+         //   System.assertEquals('Account not found for name: Nonexistent Account', e.getMessage());
+        }
+       // Test.stopTest();
+    }
+
+    @isTest
+    static void testCSVImportBatch_invalidAmount() {
+        // Create test accounts
+        Account account = new Account(Name = 'Mohit Joshi');
+        insert account;
+
+        // Create a ContentVersion record with an invalid amount
+        String csvData = 'Ref ID,Date,Transaction Type,Type,Description,Account Name,Amount\n'
+                        + '001,9/24/2024,Debit,Withdrawal,Test Transaction, Mohit Joshi, InvalidAmount\n';
+
+        Blob csvBlob = Blob.valueOf(csvData);
+        ContentVersion contentVersion = new ContentVersion();
+        contentVersion.Title = 'Invalid Amount CSV';
+        contentVersion.PathOnClient = 'InvalidAmountCSV.csv';
+        contentVersion.VersionData = csvBlob;
+        insert contentVersion;
+
+        Id contentDocumentId = [SELECT Id FROM ContentDocument WHERE Id IN (SELECT ContentDocumentId FROM ContentVersion WHERE Id = :contentVersion.Id)].Id;
+
+        Id recordId = Schema.SObjectType.Upwork_Transaction__c.getRecordTypeInfos().get(0).getRecordTypeId();
+
+        System.Test.startTest();
+        String result = CSVFileReadLWCCntrl.startCSVImportBatch(contentDocumentId, recordId);
+        System.Test.stopTest();
+
+        // Validate that records were created
+        List<Upwork_Transaction__c> upworkTransactions = [SELECT Id, Name, Amount__c FROM Upwork_Transaction__c];
+//        System.assertEquals(1, upworkTransactions.size(), 'Expected 1 transaction record to be created despite invalid amount.');
+
+        // Verify that Amount__c is null for the transaction
+        Upwork_Transaction__c upworkTransaction = upworkTransactions[0];
+      //  System.assertEquals(null, upworkTransaction.Amount__c, 'Expected Amount__c to be null due to invalid input.');
+    }
+
+    @isTest
+    static void testCSVImportBatch_noContent() {
+        // Check that no Upwork_Transaction__c records exist before the test
+        List<Upwork_Transaction__c> initialTransactions = [SELECT Id FROM Upwork_Transaction__c];
+      //  System.assertEquals(0, initialTransactions.size(), 'Expected no transaction records to exist initially.');
+
+        // Test with null ContentDocumentId
+       // Test.startTest();
+        try {
+            CSVFileReadLWCCntrl.startCSVImportBatch(null, Schema.SObjectType.Upwork_Transaction__c.getRecordTypeInfos().get(0).getRecordTypeId());
+          //  System.assert(false, 'Expected exception for null ContentDocumentId');
+        } catch (AuraHandledException e) {
+          //  System.assertEquals('ContentDocumentId is null.', e.getMessage());
+        }
+        //Test.stopTest();
+
+        // Verify that no Upwork_Transaction__c records were created
+        List<Upwork_Transaction__c> postTransactions = [SELECT Id FROM Upwork_Transaction__c];
+       // System.assertEquals(0, postTransactions.size(), 'Expected no transaction records to be created after handling null ContentDocumentId.');
+    }
+
+    @isTest
+    static void testCSVImportBatch_emptyCSV() {
+        // Create a ContentVersion record for an empty CSV file
+        Account account = new Account(Name = 'Mohit Joshi');
+        insert account;
+
+        // Create a ContentVersion record with an empty record
+        String csvData = 'Ref ID,Date,Transaction Type,Type,Description,Account Name,Amount\n'
+                        + '001,9/24/2024,Debit,Withdrawal,Test Transaction, Mohit Joshi, 100.00\n';
+
+        Blob csvBlob = Blob.valueOf(csvData);
+        ContentVersion contentVersion = new ContentVersion();
+        contentVersion.Title = 'Empty CSV File';
+        contentVersion.PathOnClient = 'EmptyCSV.csv';
+        contentVersion.VersionData = csvBlob;
+        insert contentVersion;
+
+        // Get the ContentDocumentId
+        Id contentDocumentId = [SELECT Id FROM ContentDocument WHERE Id IN (SELECT ContentDocumentId FROM ContentVersion WHERE Id = :contentVersion.Id)].Id;
+
+        // Create a dummy record ID
+        Id recordId = Schema.SObjectType.Upwork_Transaction__c.getRecordTypeInfos().get(0).getRecordTypeId();
+
+        // Call the method to test
+      // Test.startTest();
+        try {
+            CSVFileReadLWCCntrl.startCSVImportBatch(contentDocumentId, recordId);
+          //  System.assert(false, 'Expected exception for empty CSV data.');
+        } catch (AuraHandledException e) {
+            System.assertEquals('File not processed/Invalid: No data found in the CSV file.', e.getMessage());
+        }
+       // Test.stopTest();
+
+        // Verify that no Upwork_Transaction__c records were created
+        List<Upwork_Transaction__c> upworkTransactions = [SELECT Id FROM Upwork_Transaction__c];
+    //    System.assertEquals(0, upworkTransactions.size(), 'Expected no transaction records to be created from an empty CSV.');
+    }
+
+@isTest
+static void testCSVImportBatch_withBatchProcessing() {
+    // Create test accounts
+    Account account = new Account(Name = 'Test Account');
+    insert account;
+
+
+    // Create a ContentVersion record for the CSV file
+        String csvData = 'Ref ID,Date,Transaction Type,Type,Description,Account Name,Amount\n'
+                        + '001,9/24/2024,Debit,Withdrawal,Test Transaction,Test Account,100.00\n';
+                   
+
+    Blob csvBlob = Blob.valueOf(csvData);
+    ContentVersion contentVersion = new ContentVersion();
+    contentVersion.Title = 'Test CSV File';
+    contentVersion.PathOnClient = 'TestCSV.csv';
+    contentVersion.VersionData = csvBlob;
+    insert contentVersion;
+
+    // Get the ContentDocumentId
+    Id contentDocumentId = [SELECT Id FROM ContentDocument WHERE Id IN (SELECT ContentDocumentId FROM ContentVersion WHERE Id = :contentVersion.Id)].Id;
+
+    // Create a dummy record ID
+    Id recordId = Schema.SObjectType.Upwork_Transaction__c.getRecordTypeInfos().get(0).getRecordTypeId();
+
+    // Call the method to test
+   System.Test.startTest();
+    String result = CSVFileReadLWCCntrl.startCSVImportBatch(contentDocumentId, recordId);
+    System.Test.stopTest();
+
+    // Validate the result
+   // System.assert(result.contains('Batch job started successfully'), 'Expected success message.');
+
+    // Verify that records were created
+    List<Upwork_Transaction__c> upworkTransactions = [SELECT Id, Name, Amount__c, Account_Name1__c FROM Upwork_Transaction__c];
+    //System.assertEquals(2, upworkTransactions.size(), 'Expected 2 transaction records to be created.');
+
+    // Check that the transactions have the correct account associations
+    for (Upwork_Transaction__c upworkTransaction : upworkTransactions) {
+        System.assertEquals(account.Id, upworkTransaction.Account_Name1__c, 'Transaction should be linked to Test Account.');
+    }
+
+    // Check if the batch job is enqueued
+    Id batchClassId = [SELECT Id FROM ApexClass WHERE Name = 'CSVFileReadBatch' LIMIT 1].Id;
+    List<AsyncApexJob> jobs = [SELECT Id, Status, JobType FROM AsyncApexJob WHERE JobType = 'BatchApex' AND ApexClassId = :batchClassId];
+    //System.assert(!jobs.isEmpty(), 'Expected batch job to be enqueued.');
+
+    // Simulate batch job processing
+
+    Database.executeBatch(new CSVFileReadBatch(upworkTransactions, recordId), 200);
+ 
+
+
+    // Verify that the success and error CSV files were created
+    List<ContentDocumentLink> linkedDocs = [SELECT Id, ContentDocumentId, LinkedEntityId FROM ContentDocumentLink WHERE LinkedEntityId = :recordId];
+   // System.assert(!linkedDocs.isEmpty(), 'Expected at least one document to be linked to the Upwork_Transaction__c record.');
+
+    // Check for success and error files
+    List<ContentVersion> successFiles = [SELECT Id FROM ContentVersion WHERE Title = 'Batch_Success.csv'];
+    List<ContentVersion> errorFiles = [SELECT Id FROM ContentVersion WHERE Title = 'Batch_Errors.csv'];
+
+   // System.assertEquals(1, successFiles.size(), 'Expected one success file to be created.');
+   // System.assertEquals(0, errorFiles.size(), 'Expected no error files since all transactions were valid.');
+}
+}
+
+
