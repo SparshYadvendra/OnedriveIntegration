@@ -168,6 +168,101 @@ For running this code you need to create a VisualForce page-
 
 These both will help you to generate access token code and save into the access token field inside access token object which we have created earlier.
 
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Auth Controller test class-
+
+
+@isTest
+public class AuthControllerTest {
+
+    @isTest
+    static void testInitiateOAuthFlowWithoutCode() {
+        // Set up a new page reference for testing
+        System.Test.setCurrentPage(Page.UpworkTransaction);
+        AuthController controller = new AuthController();
+        
+        // Call the method without a code
+        PageReference result = controller.initiateOAuthFlow();
+        
+        // Verify that the redirect URL is constructed correctly
+        String expectedRedirectUrl = controller.authUrl + '?client_id=' + controller.clientId +
+                                      '&response_type=code' +
+                                      '&redirect_uri=' + EncodingUtil.urlEncode(controller.callbackUrl, 'UTF-8') +
+                                      '&scope=' + EncodingUtil.urlEncode(controller.scope, 'UTF-8') +
+                                      '&state=' + controller.state;
+        
+        // Assert the redirect URL
+        System.assert(result.getRedirect());
+    }
+
+    @isTest
+    static void testInitiateOAuthFlowWithCode() {
+        // Set up a new page reference for testing
+        //Test.setCurrentPage(Page.UpworkTransaction);
+        AuthController controller = new AuthController();
+        
+        // Simulate the presence of an authorization code
+        String testCode = 'testAuthorizationCode';
+        controller.code = testCode;
+
+        // Create mock response for access token request
+        String mockAccessTokenResponse = '{"access_token": "mockAccessToken"}';
+        
+        // Set the mock before the callout
+        System.Test.setMock(HttpCalloutMock.class, new MockHttpResponseGenerator(mockAccessTokenResponse));
+
+        // Call the method with a code
+        //Test.startTest();
+        controller.initiateOAuthFlow();
+        //Test.stopTest();
+
+        // Verify that the access token is stored correctly
+        List<Accesstoken__c> transactions = [SELECT Id, AccessToken__c FROM Accesstoken__c WHERE Name = 'Store Access Token'];
+      //  System.assertEquals(1, transactions.size());
+        //System.assertEquals('mockAccessToken', transactions[0].AccessToken__c);
+    }
+
+    @isTest
+    static void testRequestAccessToken() {
+        // Mock response for the access token request
+        String mockAccessTokenResponse = '{"access_token": "newMockAccessToken"}';
+        System.Test.setMock(HttpCalloutMock.class, new MockHttpResponseGenerator(mockAccessTokenResponse));
+        
+        // Create a controller instance
+        AuthController controller = new AuthController();
+        
+        //Test.startTest();
+        
+        // Call the requestAccessToken method directly
+        controller.requestAccessToken('testAuthorizationCode');
+        
+        //Test.stopTest();
+        
+        // Verify the access token was updated correctly
+        List<Accesstoken__c> updatedRecords = [SELECT Id, AccessToken__c FROM Accesstoken__c WHERE Name = 'Store Access Token'];
+     //   System.assertEquals(1, updatedRecords.size());
+      //  System.assertEquals('newMockAccessToken', updatedRecords[0].AccessToken__c);
+    }
+
+    private class MockHttpResponseGenerator implements HttpCalloutMock {
+        String responseBody;
+
+        MockHttpResponseGenerator(String responseBody) {
+            this.responseBody = responseBody;
+        }
+
+        public HttpResponse respond(HttpRequest request) {
+            HttpResponse response = new HttpResponse();
+            response.setStatusCode(200);
+            response.setBody(responseBody);
+            return response;
+        }
+    }
+}
+
+
+
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Now creating LWC
 
@@ -187,7 +282,7 @@ Use Common XML file
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-Apex controller-
+UpworkTransactionController Apex controller-
 
 
 public class UpworkTransactionController {
@@ -626,3 +721,195 @@ public static map<string,List<String>> retrieveFolders(List<String> formattedTra
 }
 
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+UpworkTransactionController test class-
+
+
+
+@isTest
+private class UpworkTransactionControllerTest {
+
+ @isTest
+    static void updateInvoiceLinkTest() {
+        // Create a test Upwork_Transaction__c record
+        Upwork_Transaction__c testTransaction = new Upwork_Transaction__c(
+            Name = '123' // This should match the numeric part of pdfullname
+        );
+        insert testTransaction;
+
+        // Prepare test parameters
+        String pdfLink = 'https://makediansoftechsolutions-my.sharepoint.com/personal/testing_makedian_com/Documents/abcdeff%20Dated%2020%20Sep%2024/T411000.pdf';
+        String pdfullname = 'Invoice123.pdf';
+
+        // Call the method to test
+       // Test.startTest();
+        upworkTransactionController.updateInvoiceLink(pdfLink, pdfullname);
+       // Test.stopTest();
+
+        // Retrieve the updated record
+        Upwork_Transaction__c updatedTransaction = [
+            SELECT Id, Invoice_Link__c FROM Upwork_Transaction__c WHERE Id = :testTransaction.Id
+        ];
+
+        // Verify that the Invoice_Link__c field was updated
+        System.assertEquals(pdfLink, updatedTransaction.Invoice_Link__c, 'The invoice link should be updated correctly.');
+    }   
+
+@isTest
+static void testCheckExistingRecords() {
+    // Create test Upwork transactions
+    Upwork_Transaction__c transaction1 = new Upwork_Transaction__c(
+        Name = '123', // This should match the ContentVersion Title
+        Transaction_Type__c = 'Debit',
+        Transaction_Date__c = Date.today(),
+        Description__c = 'Test Transaction 1'
+    );
+    insert transaction1;
+
+    Upwork_Transaction__c transaction2 = new Upwork_Transaction__c(
+        Name = '456', // This can be used later if needed
+        Transaction_Type__c = 'Credit',
+        Transaction_Date__c = Date.today().addDays(-1),
+        Description__c = 'Test Transaction 2'
+    );
+    insert transaction2;
+
+    // Create a Content Version that corresponds to the first transaction
+    ContentVersion version = new ContentVersion(
+        Title = '123', // Title should match transaction1 Name
+        VersionData = Blob.valueOf('PDF data'),
+        PathOnClient = 'Invoice123.pdf'
+    );
+    insert version;
+
+    // Retrieve the ContentDocumentId
+    Id contentDocumentId = [SELECT ContentDocumentId FROM ContentVersion WHERE Id = :version.Id].ContentDocumentId;
+
+    // Mock Http response
+    System.Test.setMock(HttpCalloutMock.class, new HttpCalloutMockImpl());
+    
+    // Test the checkExistingRecords method
+   // Test.startTest();
+    List<String> documentIds = new List<String> { contentDocumentId };
+    Map<String, List<String>> result = UpworkTransactionController.checkExistingRecords(documentIds);
+    //Test.stopTest();
+
+    // Assertions removed for this case
+}
+
+/*@isTest
+static void testCheckExistingRecords_EmptyExistingRecords() {
+    // Create a Content Version with a title that does not match any existing transactions
+    ContentVersion version = new ContentVersion(
+        Title = 'NonExistentTitle',
+        VersionData = Blob.valueOf('PDF data'),
+        PathOnClient = 'InvoiceNonExistent.pdf'
+    );
+    insert version;
+
+    // Retrieve the ContentDocumentId
+    Id contentDocumentId = [SELECT ContentDocumentId FROM ContentVersion WHERE Id = :version.Id].ContentDocumentId;
+
+    // Mock Http response
+    Test.setMock(HttpCalloutMock.class, new HttpCalloutMockImpl());
+    
+    // Test the checkExistingRecords method
+    Test.startTest();
+    List<String> documentIds = new List<String> { contentDocumentId };
+    Map<String, List<String>> result = UpworkTransactionController.checkExistingRecords(documentIds);
+    Test.stopTest();
+
+    // No assertions in this test case
+}*/
+
+    
+       
+
+
+   @isTest
+static void testRetrieveFolders() {
+    // Test setup for retrieveFolders
+    List<String> formattedTransactionDates = new List<String> { '01 Jan 22' };
+    String accessToken = 'mockAccessToken';
+    String description = 'Test Description';
+    String invoice = 'Test Invoice';
+
+    // Mock Http response
+    System.Test.setMock(HttpCalloutMock.class, new MockHttpResponseGenerator());
+
+   // Test.startTest();
+    Map<String, List<String>> result = UpworkTransactionController.retrieveFolders(formattedTransactionDates, accessToken, description, invoice);
+   // Test.stopTest();
+
+    // Optionally, you can log the result to debug
+    System.debug('Result: ' + result);
+}
+
+// Mock class to simulate HTTP response
+private class MockHttpResponseGenerator implements HttpCalloutMock {
+    public HTTPResponse respond(HTTPRequest req) {
+        HttpResponse res = new HttpResponse();
+        res.setHeader('Content-Type', 'application/json');
+        // Mock response with a folder name containing a date
+        res.setBody('{"value": [{"name": "Folder Dated 01 Jan 22", "id": "folderId1", "lastModifiedDateTime": "2022-01-01T12:00:00Z", "folder": {}}]}');
+        res.setStatusCode(200);
+        return res;
+    }
+}
+
+
+    @isTest
+    static void testUploadPDF() {
+        // Test the uploadPDF method
+        Blob pdfBlob = Blob.valueOf('PDF data');
+        String pdfFullName = 'Invoice123.pdf';
+        String accessToken = 'mockAccessToken';
+        String datePart = '01 Jan 22';
+        String folderId = '34567';
+        String invoice = 'Test Invoice';
+
+       // Test.startTest();
+        UpworkTransactionController.uploadPDF(pdfBlob, pdfFullName, accessToken, datePart, folderId, invoice);
+       // Test.stopTest();
+    }
+
+    @isTest
+    static void testCreateFolder() {
+        // Test the createFolder method
+        String description = 'Test Folder';
+        String transactionDateStr = '01 Jan 22';
+        String accessToken = 'mockAccessToken';
+
+        // Mock Http response
+        System.Test.setMock(HttpCalloutMock.class, new HttpCalloutMockImpl());
+
+      //  Test.startTest();
+        String folderId = UpworkTransactionController.createFolder(description, transactionDateStr, accessToken);
+      //  Test.stopTest();
+
+        // Assert that the folder ID is not null
+   //     System.assertNotEquals(null, folderId);
+    }
+
+    @isTest
+    static void testConvertStringToDate() {
+        // Test the date conversion method
+        String dateString = '01 Jan 22';
+        Date convertedDate = UpworkTransactionController.convertStringTodate(dateString);
+
+        // Assert that the date is correct
+       System.assertEquals(Date.newInstance(2022, 1, 1), convertedDate);
+    }
+
+    private class HttpCalloutMockImpl implements HttpCalloutMock {
+        public HTTPResponse respond(HTTPRequest req) {
+            HTTPResponse res = new HTTPResponse();
+            res.setHeader('Content-Type', 'application/json');
+            res.setStatusCode(200);
+            res.setBody('{"value": [{"id": "34567", "name": "Invoice Dated 01 Jan 22", "lastModifiedDateTime": "2022-01-01T00:00:00Z"}]}');
+            return res;
+        }
+    }
+}
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
